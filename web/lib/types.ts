@@ -42,6 +42,8 @@ export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
+  /** Base64-encoded image attachments sent with user messages. */
+  images?: string[];
   createdAt: number;
   meta?: StreamMeta;
   error?: string;
