@@ -20,6 +20,8 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
   const controller = useRef<AbortController | null>(null);
   const selectionRef = useRef(selection);
   const onFinishRef = useRef(onFinish);
+  const activeIdRef = useRef<string | null>(null);
+
   useEffect(() => {
     selectionRef.current = selection;
     onFinishRef.current = onFinish;
@@ -41,6 +43,11 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
         .map((c) => ({ ...c, messages: c.messages.filter((m) => !m.pending) })),
     );
   }, [conversations, hydrated, streaming]);
+
+  const updateActiveId = useCallback((id: string | null) => {
+    activeIdRef.current = id;
+    setActiveId(id);
+  }, []);
 
   const update = useCallback((id: string, fn: Updater) => {
     setConversations((list) => list.map((c) => (c.id === id ? fn(c) : c)));
@@ -85,7 +92,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
 
       try {
         await streamChat({
-          messages: history.filter((m) => !m.error).map(({ role, content }) => ({ role, content })),
+          messages: history.filter((m) => !m.error).map(({ role, content, images }) => ({ role, content, images })),
           selection: selectionRef.current,
           signal: ctrl.signal,
           onMeta: (meta) => patchMessage(convId, reply.id, { meta }),
@@ -118,10 +125,17 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
   );
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, images?: string[]) => {
       const content = text.trim();
-      if (!content || controller.current) return;
-      const userMsg: ChatMessage = { id: uid(), role: "user", content, createdAt: Date.now() };
+      if (!content && !images) return;
+      if (controller.current) return;
+      const userMsg: ChatMessage = {
+        id: uid(),
+        role: "user",
+        content,
+        images,
+        createdAt: Date.now()
+      };
       const existing = conversations.find((c) => c.id === activeId);
       if (existing) {
         void generate(existing.id, [...existing.messages.filter((m) => !m.error), userMsg]);
@@ -129,7 +143,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       }
       const conv: Conversation = {
         id: uid(),
-        title: makeTitle(content),
+        title: makeTitle(content || (images ? "Image message" : "")),
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -139,6 +153,38 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       void generate(conv.id, [userMsg]);
     },
     [activeId, conversations, generate],
+  );
+
+  const addVoiceMessage = useCallback(
+    (role: "user" | "assistant", content: string) => {
+      const text = content.trim();
+      if (!text) return;
+      const message: ChatMessage = { id: uid(), role, content: text, createdAt: Date.now() };
+
+      // Use the ref for synchronous check of the active conversation
+      const currentId = activeIdRef.current;
+
+      if (currentId) {
+        setConversations((list) =>
+          list.map((c) =>
+            c.id === currentId
+              ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
+              : c,
+          ),
+        );
+      } else {
+        const conversation: Conversation = {
+          id: uid(),
+          title: makeTitle(text),
+          messages: [message],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        setConversations((list) => [conversation, ...list]);
+        updateActiveId(conversation.id);
+      }
+    },
+    [updateActiveId],
   );
 
   const stop = useCallback(() => controller.current?.abort(), []);
@@ -165,15 +211,15 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
 
   const newChat = useCallback(() => {
     controller.current?.abort();
-    setActiveId(null);
-  }, []);
+    updateActiveId(null);
+  }, [updateActiveId]);
 
   const openChat = useCallback(
     (id: string) => {
-      if (id !== activeId) controller.current?.abort();
-      setActiveId(id);
+      if (id !== activeIdRef.current) controller.current?.abort();
+      updateActiveId(id);
     },
-    [activeId],
+    [updateActiveId],
   );
 
   /** Deletes a chat and returns a function that restores it. */
@@ -182,9 +228,9 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       const index = conversations.findIndex((c) => c.id === id);
       const removed = conversations[index];
       if (!removed) return () => {};
-      if (id === activeId) {
+      if (id === activeIdRef.current) {
         controller.current?.abort();
-        setActiveId(null);
+        updateActiveId(null);
       }
       setConversations((list) => list.filter((c) => c.id !== id));
       return () =>
@@ -212,6 +258,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
     streaming,
     hydrated,
     send,
+    addVoiceMessage,
     stop,
     regenerate,
     setFeedback,

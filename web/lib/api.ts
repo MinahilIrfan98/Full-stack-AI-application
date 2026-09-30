@@ -6,6 +6,36 @@ import type { ModelSelection, ModelsResponse, Role, StreamMeta } from "@/lib/typ
  */
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
+export interface VoiceToken {
+  server_url: string;
+  participant_token: string;
+  room_name: string;
+}
+
+export async function createVoiceToken(): Promise<VoiceToken> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/voice/token`, { method: "POST", cache: "no-store" });
+  } catch {
+    throw new ApiError("Can't reach the API server. Make sure it is running.");
+  }
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+  return (await res.json()) as VoiceToken;
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+}
+
+/** GET /api/me fetches the current signed-in user's profile. */
+export async function fetchUserProfile(): Promise<UserProfile> {
+  const res = await fetch(`${API_BASE}/me`, { cache: "no-store" });
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
+  return (await res.json()) as UserProfile;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -24,7 +54,7 @@ async function errorMessage(res: Response): Promise<string> {
   } catch {
     /* not JSON */
   }
-  if (res.status === 502 || res.status === 503 || res.status === 504 || res.status === 500) {
+  if (res.status === 502 || res.status === 504 || res.status === 500) {
     return "Can't reach the AI server. Make sure the API is running.";
   }
   return `Request failed (${res.status})`;
@@ -46,7 +76,7 @@ export async function fetchModels(refresh = false, signal?: AbortSignal): Promis
 }
 
 export interface StreamChatOptions {
-  messages: { role: Role; content: string }[];
+  messages: { role: Role; content: string; images?: string[] }[];
   selection: ModelSelection;
   signal: AbortSignal;
   onMeta: (meta: StreamMeta) => void;

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { CodeIcon, LightbulbIcon, MailIcon, ListChecksIcon } from "lucide-react";
 
-import { APP_CONFIG, firstNameOf } from "@/lib/config";
+import { firstNameOf } from "@/lib/config";
+import { useUser } from "@/hooks/use-user";
 
 const SUGGESTIONS = [
   {
@@ -38,14 +39,17 @@ function greeting() {
 }
 
 export function EmptyState() {
+  const { user } = useUser();
   // Time-based text differs between server and client, so render it after mount.
   const [hello, setHello] = useState("Hello");
   useEffect(() => setHello(greeting()), []);
 
+  const displayName = user?.name ? firstNameOf(user.name) : null;
+
   return (
     <div className="px-4 pb-6 text-center">
       <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-        {hello}, {firstNameOf(APP_CONFIG.user.name)}
+        {hello}{displayName ? `, ${displayName}` : ""}
       </h1>
       <p className="mt-2 text-muted-foreground">How can I help you today?</p>
     </div>
