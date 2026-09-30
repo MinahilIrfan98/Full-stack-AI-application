@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowUpIcon, SquareIcon } from "lucide-react";
+import { ArrowUpIcon, ImageIcon, SquareIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { VoiceCall } from "@/components/chat/voice-call";
 import { APP_CONFIG } from "@/lib/config";
 import { cn } from "@/lib/utils";
 
 export function Composer({
   onSend,
   onStop,
+  onVoiceTranscript,
   streaming,
   disabled,
   placeholder = `Message ${APP_CONFIG.appName}…`,
@@ -16,6 +19,7 @@ export function Composer({
 }: {
   onSend: (text: string, images?: string[]) => void;
   onStop: () => void;
+  onVoiceTranscript: (role: "user" | "assistant", text: string) => void;
   streaming: boolean;
   disabled?: boolean;
   placeholder?: string;
@@ -24,6 +28,7 @@ export function Composer({
   const [value, setValue] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (autoFocus && window.matchMedia("(min-width: 768px)").matches) ref.current?.focus();
@@ -79,7 +84,7 @@ export function Composer({
       <label htmlFor="composer" className="sr-only">
         Message
       </label>
-      <div className="flex items-end gap-2">
+      <div className="flex min-w-0 items-end gap-2">
         <textarea
           id="composer"
           ref={ref}
@@ -89,17 +94,25 @@ export function Composer({
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           enterKeyHint="send"
-          className="field-sizing-content max-h-52 min-h-7 w-full resize-none bg-transparent py-1.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
+          className="field-sizing-content max-h-52 min-h-7 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 outline-none placeholder:text-muted-foreground"
         />
-        <div className="flex items-center gap-1">
-          <label className="cursor-pointer rounded-full p-1.5 transition-colors hover:bg-muted">
-            <input type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
-              <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-            </svg>
-          </label>
+        <div className="flex shrink-0 items-center gap-1">
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileChange} />
+          <VoiceCall onTranscript={onVoiceTranscript} />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Upload image"
+                onClick={() => fileRef.current?.click()}
+              >
+                <ImageIcon className="text-muted-foreground" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Upload image</TooltipContent>
+          </Tooltip>
           <Button
             type="submit"
             size="icon"

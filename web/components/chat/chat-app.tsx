@@ -9,7 +9,6 @@ import { Composer } from "@/components/chat/composer";
 import { EmptyState, SuggestionGrid } from "@/components/chat/empty-state";
 import { MessageList } from "@/components/chat/message-list";
 import { ModelPicker } from "@/components/chat/model-picker";
-import { VoiceCall } from "@/components/chat/voice-call";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -80,6 +79,7 @@ export function ChatApp() {
     <Composer
       onSend={chat.send}
       onStop={chat.stop}
+      onVoiceTranscript={chat.addVoiceMessage}
       streaming={chat.streaming}
       disabled={noModels}
       autoFocus
@@ -131,7 +131,6 @@ export function ChatApp() {
           </Tooltip>
           <ModelPicker models={models} />
           <div className="flex-1" />
-          <VoiceCall onTranscript={chat.addVoiceMessage} />
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

@@ -6,6 +6,7 @@ import { Room, RoomEvent, Track, type Participant } from "livekit-client";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ApiError, createVoiceToken } from "@/lib/api";
 
 export function VoiceCall({
@@ -90,17 +91,23 @@ export function VoiceCall({
     audioElements.current.clear();
   }, []);
 
+  const label = connected ? "End voice chat" : connecting ? "Connecting…" : "Start voice chat";
+
   return (
-    <Button
-      type="button"
-      variant={connected ? "destructive" : "ghost"}
-      size="icon"
-      disabled={connecting}
-      aria-label={connected ? "End voice call" : "Start voice call"}
-      title={connected ? "End voice call" : connecting ? "Connecting…" : "Talk to the voice agent"}
-      onClick={() => (connected ? void endCall() : void startCall())}
-    >
-      {connected ? <PhoneOffIcon /> : <MicIcon />}
-    </Button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant={connected ? "destructive" : "ghost"}
+          size="icon-sm"
+          disabled={connecting}
+          aria-label={label}
+          onClick={() => (connected ? void endCall() : void startCall())}
+        >
+          {connected ? <PhoneOffIcon /> : <MicIcon />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   );
 }
