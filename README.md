@@ -1,108 +1,102 @@
-# 🤖 OpenChat AI Assistant
+# OpenChat AI Assistant
 
-A full-stack AI assistant featuring real-time text chat, image understanding, and low-latency voice interactions.
+A chat app I built that handles text, images, documents and voice. The models run on your own machine through Ollama, so your messages stay local unless you pick a cloud model yourself.
 
-## 🌟 Features
+Live demo: https://full-stack-ai-application-three.vercel.app
 
--   **💬 Multimodal Chat**: Seamlessly switch between text and image inputs.
--   **👁️ Image Understanding**: Upload photos and ask the AI to describe or analyze them using vision models.
--   **🎙️ LiveKit Voice**: Real-time, low-latency voice conversations powered by a dedicated AI agent.
--   **🏠 Local-First AI**: Powered by Ollama for privacy and cost-efficiency, with cloud fallback options.
--   **⚡ Streaming Responses**: Server-Sent Events (SSE) for a responsive, "typing" feel.
+The deployed version can't reach an Ollama running on my laptop, so it only works with a cloud model selected.
 
-## 🏗 Architecture
+## What it does
 
-```mermaid
-graph TD
-    User((User))
-    
-    subgraph Frontend [Web Frontend - Next.js]
-        UI[Chat Interface]
-        State[React State/Hooks]
-    end
-    
-    subgraph Backend [Backend API - FastAPI]
-        Route[API Routes]
-        Service[Chat Service]
-        Prov[AI Providers]
-    end
-    
-    subgraph VoiceAgent [Voice Agent - LiveKit]
-        VAD[Silence Detection]
-        STT[Speech-to-Text]
-        Brain[LLM Brain]
-        TTS[Text-to-Speech]
-    end
-    
-    subgraph AI_Engines [AI Engines]
-        Ollama[Ollama Local]
-        Cloud[Cloud AI APIs]
-    end
-    
-    User <--> UI
-    UI <--> State
-    State <--> Route
-    Route <--> Service
-    Service <--> Prov
-    Prov <--> Ollama
-    Prov <--> Cloud
-    
-    User <--> VoiceAgent
-    VoiceAgent <--> Ollama
-```
+Replies stream in token by token over Server-Sent Events, which makes the chat feel like someone is typing back.
 
-## 🛠 Tech Stack
+You can attach a photo and ask about it. A vision model (llava) looks at the image and answers.
 
-| Layer | Technology | Description |
-| :--- | :--- | :--- |
-| **Frontend** | Next.js 16, React 19 | Framework and UI library |
-| **Styling** | Tailwind CSS 4, shadcn/ui | Modern utility-first styling |
-| **Backend** | FastAPI, Python 3.13 | High-performance async API |
-| **Package Mgr** | uv | Fast Python package management |
-| **Voice** | LiveKit | Real-time audio infrastructure |
-| **AI (Local)** | Ollama | Local model hosting |
-| **Models** | Gemma 3, Llava | LLM and Vision models |
+You can also attach a document: txt, md, csv, json, source code, pdf or docx. The backend pulls the text out of the file, passes it to the model along with your question, and the answer is based on what the file says. The attached file shows up as a small chip above your message, so the chat history keeps track of what you uploaded. Files are limited to 4 MB.
 
-## 🚀 Getting Started
+For voice, a Python agent joins a LiveKit room, listens, thinks with Ollama and talks back with low delay.
 
-### 1. Local AI Setup
-Install [Ollama](https://ollama.ai/) and pull the required models:
+## How the pieces connect
+
+For text, images and files the path is browser, then Next.js, then FastAPI, then Ollama, and the answer streams back the same way.
+
+For voice the browser joins a LiveKit room, the Python agent in the same room picks up the audio, sends it through Ollama and speaks the reply.
+
+The repo has three folders: `web` for the Next.js frontend, `api` for the FastAPI backend, and `agent` for the voice agent.
+
+## Tech stack
+
+| Part | What I used |
+| --- | --- |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui |
+| Backend | FastAPI on Python 3.13, managed with uv |
+| File reading | pypdf for PDFs, python-docx for Word files |
+| Voice | LiveKit, Deepgram for speech to text |
+| Models | Ollama with Gemma 3 for chat and llava for images |
+
+## Running it locally
+
+You need Ollama, Node.js, Python 3.13 and uv installed. The app needs three terminals open at the same time, one each for the backend, frontend and (optionally) the voice agent.
+
+Start with the models:
+
 ```bash
-ollama pull gemma3:1b  # For chat & voice
-ollama pull llava      # For vision/images
+ollama pull gemma3:1b
+ollama pull llava
 ```
 
-### 2. Backend API
+Backend:
+
 ```bash
 cd api
+cp .env.example .env   # then fill in your values
 uv sync
-# Create .env from .env.example and add your keys
 uv run fastapi dev
 ```
 
-### 3. Web Frontend
+Frontend:
+
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-### 4. Voice Agent
+Open http://localhost:3000. If the page says it can't reach the AI server, the backend isn't running yet.
+
+Voice agent, only if you want voice:
+
 ```bash
 cd agent
 pip install livekit-agents livekit-plugins-ollama livekit-plugins-silero livekit-plugins-deepgram python-dotenv
 python agent.py dev
 ```
 
-## ⚙️ Configuration
+One thing that cost me time: `fastapi dev` restarts itself whenever a file in `api` changes. If you generate test files inside that folder, the server keeps reloading while you're trying to chat.
 
-The application uses `.env` files for sensitive configuration. **Never commit your `.env` file to GitHub.**
+## Configuration
 
-**Key Variables:**
-- `OLLAMA_BASE_URL`: URL of your local Ollama instance.
-- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`: Required for the voice feature.
+Secrets live in `.env` files, which are git-ignored. Don't commit them.
 
-## 🛠 Workflow
+| Variable | Used for |
+| --- | --- |
+| `OLLAMA_BASE_URL` | Address of your Ollama server |
+| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Voice rooms |
+| `DEEPGRAM_API_KEY` | Speech to text for the voice agent |
 
-1.  **Text/Image Flow**: `User` $\rightarrow$ `Next.js` $\rightarrow$ `FastAPI` $\rightarrow$ `Ollama` $\rightarrow$ `Streaming Response` $\rightarrow$ `User`.
-2.  **Voice Flow**: `User` $\rightarrow$ `LiveKit Room` $\rightarrow$ `Python Agent` $\rightarrow$ `Ollama` $\rightarrow$ `Voice Response` $\rightarrow$ `User`.
+## API routes
+
+| Route | Purpose |
+| --- | --- |
+| `GET /api/health` | Quick check that the backend is up |
+| `GET /api/models` | Lists the models the UI can choose from |
+| `POST /api/chat` | Sends a message and streams the reply |
+| `POST /api/upload` | Takes a file and returns its extracted text |
+
+## Known limits
+
+Uploads over 4 MB are rejected. That keeps it inside what Vercel allows too.
+
+A scanned PDF is just pictures of pages, so there is no text to extract. It needs OCR first, which this project doesn't do.
+
+Small local models like gemma3:1b struggle with long documents. For anything big, a larger or cloud model gives much better answers.
