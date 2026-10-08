@@ -1,60 +1,76 @@
 # OpenChat AI Assistant
 
-A chat app I built that handles text, images, documents and voice. The models run on your own machine through Ollama, so your messages stay local unless you pick a cloud model yourself.
+OpenChat is a self-hosted AI chat app with a Next.js interface and a FastAPI backend. It streams replies from local Ollama models, supports image questions, extracts text from common documents, and can connect to optional cloud providers and LiveKit voice services.
 
-Live demo: https://full-stack-ai-application-three.vercel.app
+## Features
 
-The deployed version can't reach an Ollama running on my laptop, so it only works with a cloud model selected.
+- Streamed chat responses over Server-Sent Events (SSE).
+- Local Ollama models, with optional cloud providers as fallbacks.
+- Image uploads for vision-capable models.
+- Text, Markdown, CSV, JSON, code, PDF, and DOCX file attachments.
+- Large-file retrieval using Ollama embeddings and in-memory per-upload indexes.
+- Conversation history stored in browser local storage.
+- Optional LiveKit voice sessions.
+- Dark and light themes.
 
-## What it does
+## Architecture
 
-Replies stream in token by token over Server-Sent Events, which makes the chat feel like someone is typing back.
+```mermaid
+flowchart LR
+    User --> Web[Next.js web app]
+    Web -->|/api requests| API[FastAPI API]
+    API --> Chat[Chat and file services]
+    Chat --> Ollama[Ollama models]
+    Chat --> Cloud[Optional cloud providers]
+    Web -. optional voice .-> LiveKit[LiveKit]
+    LiveKit -. dispatches .-> Agent[Voice agent]
+    Agent --> Ollama
+```
 
-You can attach a photo and ask about it. A vision model (llava) looks at the image and answers.
+## Requirements
 
-You can also attach a document: txt, md, csv, json, source code, pdf or docx. The backend pulls the text out of the file, passes it to the model along with your question, and the answer is based on what the file says. The attached file shows up as a small chip above your message, so the chat history keeps track of what you uploaded. Files are limited to 4 MB.
+- Node.js 24 (Node.js 20.9 or newer is required by the frontend package).
+- Python 3.13 and [`uv`](https://docs.astral.sh/uv/).
+- [Ollama](https://ollama.com/) for local models.
+- Git (optional, for cloning the repository).
 
-For voice, a Python agent joins a LiveKit room, listens, thinks with Ollama and talks back with low delay.
+## Quick start
 
-## How the pieces connect
+### 1. Start Ollama
 
-For text, images and files the path is browser, then Next.js, then FastAPI, then Ollama, and the answer streams back the same way.
-
-For voice the browser joins a LiveKit room, the Python agent in the same room picks up the audio, sends it through Ollama and speaks the reply.
-
-The repo has three folders: `web` for the Next.js frontend, `api` for the FastAPI backend, and `agent` for the voice agent.
-
-## Tech stack
-
-| Part | What I used |
-| --- | --- |
-| Frontend | Next.js 16, React 19, Tailwind CSS 4, shadcn/ui |
-| Backend | FastAPI on Python 3.13, managed with uv |
-| File reading | pypdf for PDFs, python-docx for Word files |
-| Voice | LiveKit, Deepgram for speech to text |
-| Models | Ollama with Gemma 3 for chat and llava for images |
-
-## Running it locally
-
-You need Ollama, Node.js, Python 3.13 and uv installed. The app needs three terminals open at the same time, one each for the backend, frontend and (optionally) the voice agent.
-
-Start with the models:
+Install and start Ollama, then pull a chat model. For example:
 
 ```bash
 ollama pull gemma3:1b
+```
+
+For image questions, pull a vision model too:
+
+```bash
 ollama pull llava
 ```
 
-Backend:
+Large document retrieval uses `nomic-embed-text`. The backend attempts to pull it from Ollama when needed. You can pull it ahead of time:
+
+```bash
+ollama pull nomic-embed-text
+```
+
+### 2. Start the API
+
+In a terminal at the repository root:
 
 ```bash
 cd api
-cp .env.example .env   # then fill in your values
 uv sync
-uv run fastapi dev
+uv run fastapi dev app/main.py
 ```
 
-Frontend:
+The API is available at <http://127.0.0.1:8000>. Interactive API docs are at <http://127.0.0.1:8000/docs>.
+
+### 3. Start the web app
+
+In another terminal:
 
 ```bash
 cd web
@@ -62,41 +78,115 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:3000. If the page says it can't reach the AI server, the backend isn't running yet.
-
-Voice agent, only if you want voice:
-
-```bash
-cd agent
-pip install livekit-agents livekit-plugins-ollama livekit-plugins-silero livekit-plugins-deepgram python-dotenv
-python agent.py dev
-```
-
-One thing that cost me time: `fastapi dev` restarts itself whenever a file in `api` changes. If you generate test files inside that folder, the server keeps reloading while you're trying to chat.
+Open <http://localhost:3000>. The Next.js server forwards `/api/*` requests to the backend at `http://localhost:8000` by default.
 
 ## Configuration
 
-Secrets live in `.env` files, which are git-ignored. Don't commit them.
+The API reads settings from environment variables and `api/.env`. Start from the example file if you need optional integrations:
 
-| Variable | Used for |
-| --- | --- |
-| `OLLAMA_BASE_URL` | Address of your Ollama server |
-| `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` | Voice rooms |
-| `DEEPGRAM_API_KEY` | Speech to text for the voice agent |
+```bash
+cp api/.env.example api/.env
+```
 
-## API routes
+On Windows PowerShell, use `Copy-Item api/.env.example api/.env` instead. The local Ollama setup works without cloud API keys. Keep `.env` files, API keys, and other secrets out of source control.
 
-| Route | Purpose |
-| --- | --- |
-| `GET /api/health` | Quick check that the backend is up |
-| `GET /api/models` | Lists the models the UI can choose from |
-| `POST /api/chat` | Sends a message and streams the reply |
-| `POST /api/upload` | Takes a file and returns its extracted text |
+### Common API settings
 
-## Known limits
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_HOST` | `http://localhost:11434` | Ollama server address. |
+| `OLLAMA_ENABLED` | `true` | Enable the local Ollama provider. |
+| `MAX_UPLOAD_MB` | `4` | Maximum document upload size in megabytes. Increase locally, for example to `50`, for larger files. |
+| `ALLOW_CLOUD_FALLBACK` | `true` | Allow configured cloud providers when a selected/local model fails before streaming starts. |
+| `REQUEST_TIMEOUT_SECONDS` | `120` | Request timeout for cloud providers. |
+| `OLLAMA_TIMEOUT_SECONDS` | `600` | Request timeout for Ollama. |
+| `CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed browser origins when calling the API directly. |
 
-Uploads over 4 MB are rejected. That keeps it inside what Vercel allows too.
+For cloud providers, configure the relevant API key and optional model/base URL in `api/.env`. Provider settings include Anthropic, OpenAI, Gemini, Grok, and Meta. The browser never receives backend API keys.
 
-A scanned PDF is just pictures of pages, so there is no text to extract. It needs OCR first, which this project doesn't do.
+### Large file uploads
 
-Small local models like gemma3:1b struggle with long documents. For anything big, a larger or cloud model gives much better answers.
+The default upload cap is 4 MB, suitable for hosted deployments. For local use, set this in `api/.env`:
+
+```dotenv
+MAX_UPLOAD_MB=50
+```
+
+Small files retain the direct context flow, with extracted text capped at 8,000 characters. Larger files are split into overlapping chunks, embedded with `nomic-embed-text`, and searched for the most relevant passages when you ask a question. The current index is held in backend memory for the lifetime of the running process; after a restart, attach the file again.
+
+## Voice setup (optional)
+
+Voice calls require a LiveKit project and a running voice agent. Configure `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, and `LIVEKIT_AGENT_NAME` in `api/.env`, then run the agent from the `agent/` directory using the dependencies listed by that agent. Keep the LiveKit API secret on the backend. Voice functionality is optional; chat does not require it.
+
+## Docker Compose
+
+The Compose file starts the API and web app. Configure `api/.env` first, then run:
+
+```bash
+docker compose up --build
+```
+
+The web app will be at <http://localhost:3000> and the API at <http://localhost:8000>. To run Ollama in Docker instead of on the host, start its optional profile:
+
+```bash
+docker compose --profile ollama up --build
+```
+
+Set `OLLAMA_HOST=http://ollama:11434` for the API service when using that profile. Pull the required Ollama models into the persistent Ollama volume.
+
+## Development and tests
+
+### API
+
+```bash
+cd api
+uv run ruff check .
+uv run ruff format --check .
+uv run pytest
+```
+
+### Web
+
+```bash
+cd web
+npm run typecheck
+npm run build
+```
+
+## API endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/health` | API health check. |
+| `GET` | `/api/models` | Lists available local and configured cloud models. Use `?refresh=true` to refresh the provider cache. |
+| `POST` | `/api/upload` | Extracts supported document text or indexes a large document for retrieval. Multipart field: `file`. |
+| `POST` | `/api/chat` | Streams a chat reply as SSE. |
+| `POST` | `/api/voice/token` | Creates a short-lived LiveKit participant token and dispatches the voice agent. |
+
+## Project layout
+
+```text
+api/
+  app/
+    main.py                 FastAPI app, routes, middleware, and CORS
+    core/config.py          Environment-based settings
+    routes/                 Chat, upload, health, model, and voice endpoints
+    providers/              Ollama and cloud provider adapters
+    services/               Streaming chat and large-file retrieval
+  tests/                    API tests
+web/
+  app/                      Next.js routes and global styles
+  components/chat/          Chat UI and composer
+  hooks/                    Chat and model state
+  lib/                      API client, types, and helpers
+agent/                      Optional LiveKit voice agent
+```
+
+## Troubleshooting
+
+- **No model appears:** Check that Ollama is running and that a chat model is installed with `ollama list`.
+- **Image questions fail:** Use a vision-capable model such as `llava` and select it in the model picker if needed.
+- **A document is too large:** The API reports the configured `MAX_UPLOAD_MB` limit. Raise it for local use and restart the API.
+- **Large-file processing fails:** Confirm Ollama is reachable and that `nomic-embed-text` can be pulled and run.
+- **The web app cannot reach the API:** Confirm the backend is running on port 8000. Set `API_URL` in `web/.env.local` if it uses a different address, then restart Next.js.
+- **Cloud fallback is unavailable:** Configure that provider’s backend API key and make sure `ALLOW_CLOUD_FALLBACK` is enabled if you want fallback behavior.
