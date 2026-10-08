@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { streamChat } from "@/lib/api";
 import { makeTitle, readStorage, uid, writeStorage } from "@/lib/helpers";
-import type { ChatMessage, Conversation, ModelSelection } from "@/lib/types";
+import type { ChatMessage, Conversation, MessageAttachment, ModelSelection } from "@/lib/types";
 
 const KEY = "assistant.conversations.v1";
 const MAX_SAVED = 200;
@@ -65,7 +65,16 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
   );
 
   const generate = useCallback(
-    async (convId: string, history: ChatMessage[]) => {
+    async (
+      convId: string,
+      history: ChatMessage[],
+      fileContext?: {
+        filename: string;
+        text: string;
+        session_id?: string;
+        retrieval?: boolean;
+      },
+    ) => {
       const reply: ChatMessage = {
         id: uid(),
         role: "assistant",
@@ -100,6 +109,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
             buffer += text;
             if (!frame) frame = requestAnimationFrame(flush);
           },
+          fileContext,
         });
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -125,32 +135,43 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
   );
 
   const send = useCallback(
-    (text: string, images?: string[]) => {
+    (
+      text: string,
+      images?: string[],
+      fileContext?: {
+        filename: string;
+        text: string;
+        session_id?: string;
+        retrieval?: boolean;
+      },
+      attachments?: MessageAttachment[],
+    ) => {
       const content = text.trim();
-      if (!content && !images) return;
+      if (!content && !images && !fileContext) return;
       if (controller.current) return;
       const userMsg: ChatMessage = {
         id: uid(),
         role: "user",
         content,
         images,
+        attachments,
         createdAt: Date.now()
       };
       const existing = conversations.find((c) => c.id === activeId);
       if (existing) {
-        void generate(existing.id, [...existing.messages.filter((m) => !m.error), userMsg]);
+        void generate(existing.id, [...existing.messages.filter((m) => !m.error), userMsg], fileContext);
         return;
       }
       const conv: Conversation = {
         id: uid(),
-        title: makeTitle(content || (images ? "Image message" : "")),
+        title: makeTitle(content || (images ? "Image message" : "") || (fileContext ? `File: ${fileContext.filename}` : "")),
         messages: [],
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
       setConversations((list) => [conv, ...list]);
       setActiveId(conv.id);
-      void generate(conv.id, [userMsg]);
+      void generate(conv.id, [userMsg], fileContext);
     },
     [activeId, conversations, generate],
   );

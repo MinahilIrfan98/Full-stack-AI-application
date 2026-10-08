@@ -12,8 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.middleware.upload_limit import UploadLimitMiddleware
 from app.providers.registry import ProviderRegistry, build_providers
-from app.routes import chat, health, models, voice
+from app.routes import chat, health, models, voice, upload
 
 
 def create_app(
@@ -44,7 +45,8 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"],
     )
-    for router in (health.router, models.router, chat.router, voice.router):
+    app.add_middleware(UploadLimitMiddleware, max_upload_bytes=settings.max_upload_mb * 1024 * 1024)
+    for router in (health.router, models.router, chat.router, voice.router, upload.router):
         app.include_router(router, prefix="/api")
     return app
 

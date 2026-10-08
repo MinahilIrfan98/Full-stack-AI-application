@@ -14,6 +14,7 @@ from typing import Any
 from app.providers.base import ProviderError
 from app.providers.registry import ProviderRegistry
 from app.schemas import ChatMessage, ChatRequest
+from app.services.file_memory import get_file_memory
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class ChatService:
         self._registry = registry
         self._system_prompt = system_prompt
         self._allow_fallback = allow_fallback
+        ollama = registry.get("ollama")
+        self._ollama_host = getattr(
+            ollama, "_host", getattr(ollama, "host", "http://localhost:11434")
+        )
 
     def _with_system(self, messages: list[ChatMessage]) -> list[ChatMessage]:
         if not self._system_prompt or any(m.role == "system" for m in messages):
@@ -61,6 +66,27 @@ class ChatService:
             return
 
         messages = self._with_system(request.messages)
+
+        # Inject file context into the last user message
+        if request.file_context and messages and messages[-1].role == "user":
+            original_content = messages[-1].content
+            file_text = request.file_context.text
+            if request.file_context.retrieval and request.file_context.session_id:
+                try:
+                    chunks = await get_file_memory(self._ollama_host).search(
+                        request.file_context.session_id, original_content
+                    )
+                    file_text = "\n\n---\n\n".join(chunks)
+                except Exception as exc:
+                    yield ChatEvent("error", {"message": f"Could not search uploaded file: {exc}"})
+                    return
+            context_text = (
+                f"Context from {request.file_context.filename}:\n"
+                f"{file_text}\n\n"
+                f"User Question: {original_content}"
+            )
+            messages[-1].content = context_text
+
         failures: list[str] = []
 
         for candidate in candidates:

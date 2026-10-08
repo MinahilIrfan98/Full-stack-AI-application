@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   CheckIcon,
   CopyIcon,
+  FileIcon,
   HardDriveIcon,
   CloudIcon,
   RefreshCwIcon,
@@ -17,6 +18,19 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/types";
+
+function attachmentSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 ** 2) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 ** 2).toFixed(1)} MB`;
+}
+
+function attachmentType(mimeType: string, filename: string): string {
+  if (mimeType.startsWith("image/")) return mimeType.slice(6).toUpperCase();
+  const extension = filename.split(".").pop();
+  if (extension && extension !== filename) return extension.toUpperCase();
+  return mimeType || "File";
+}
 
 function IconAction({
   label,
@@ -93,7 +107,40 @@ export function Message({
     return (
       <div className="group flex flex-col items-end gap-1">
         <div className="max-w-[85%] rounded-3xl bg-secondary px-4 py-2.5 text-[15px] leading-7 break-words whitespace-pre-wrap">
-          {message.images && message.images.length > 0 && (
+          {message.attachments?.length ? (
+            <div className="mb-2 flex flex-wrap gap-2">
+              {message.attachments.map((attachment, index) => (
+                <div
+                  key={`${attachment.filename}-${index}`}
+                  className={cn(
+                    "flex min-w-0 items-center gap-2 rounded-xl border border-border/70 bg-background/50 p-2 text-left",
+                    attachment.previewUrl ? "max-w-48" : "max-w-64",
+                  )}
+                  title={attachment.filename}
+                >
+                  {attachment.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={attachment.previewUrl}
+                      alt={attachment.filename}
+                      className="size-10 shrink-0 rounded-lg border bg-muted object-cover"
+                    />
+                  ) : (
+                    <span className="grid size-9 shrink-0 place-items-center rounded-lg border bg-muted text-muted-foreground">
+                      <FileIcon className="size-4" />
+                    </span>
+                  )}
+                  <span className="flex min-w-0 flex-col leading-tight">
+                    <span className="truncate text-xs font-medium">{attachment.filename}</span>
+                    <span className="mt-1 truncate text-[10px] text-muted-foreground">
+                      {attachmentType(attachment.mimeType, attachment.filename)}
+                      {attachment.size > 0 && ` · ${attachmentSize(attachment.size)}`}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : message.images && message.images.length > 0 ? (
             <div className="mb-2 flex flex-wrap gap-2">
               {message.images.map((img, i) => (
                 <img
@@ -104,7 +151,7 @@ export function Message({
                 />
               ))}
             </div>
-          )}
+          ) : null}
           {message.content}
         </div>
         <div className="opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">

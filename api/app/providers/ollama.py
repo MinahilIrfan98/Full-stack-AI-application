@@ -57,26 +57,48 @@ class OllamaProvider(Provider):
         messages: list[ChatMessage],
         temperature: float | None = None,
     ) -> AsyncIterator[str]:
-        options = {"temperature": temperature} if temperature is not None else None
-        try:
-            # Convert ChatMessage to Ollama format, including images
-            formatted_messages = []
-            for m in messages:
-                msg_dict = {"role": m.role, "content": m.content}
-                if m.images:
-                    msg_dict["images"] = m.images
-                formatted_messages.append(msg_dict)
+        # Convert ChatMessage to Ollama format, including images.
+        formatted_messages = []
+        for message in messages:
+            msg_dict = {"role": message.role, "content": message.content}
+            if message.images:
+                msg_dict["images"] = message.images
+            formatted_messages.append(msg_dict)
 
-            stream = await self._client.chat(
-                model=model,
-                messages=formatted_messages,
-                stream=True,
-                options=options,
-            )
-            async for chunk in stream:
-                if chunk.message and chunk.message.content:
-                    yield chunk.message.content
-        except ResponseError as exc:
-            raise ProviderError(f"Ollama error: {exc.error}") from exc
+        # Prefer the full context window. On constrained machines, a cold model
+        # load may fail before producing a token; retry that allocation failure
+        # with a smaller context so the local model can still answer.
+        try:
+            for num_ctx in (8192, 2048):
+                options = {"num_ctx": num_ctx}
+                if temperature is not None:
+                    options["temperature"] = temperature
+                started = False
+                try:
+                    stream = await self._client.chat(
+                        model=model,
+                        messages=formatted_messages,
+                        stream=True,
+                        options=options,
+                    )
+                    async for chunk in stream:
+                        if chunk.message and chunk.message.content:
+                            started = True
+                            yield chunk.message.content
+                    return
+                except ResponseError as exc:
+                    allocation_error = any(
+                        phrase in exc.error.lower()
+                        for phrase in (
+                            "unable to allocate",
+                            "failed to allocate",
+                            "insufficient system resources",
+                        )
+                    )
+                    if num_ctx == 8192 and not started and allocation_error:
+                        continue
+                    raise ProviderError(f"Ollama error: {exc.error}") from exc
+        except ProviderError:
+            raise
         except (httpx.HTTPError, ConnectionError) as exc:
             raise ProviderError(f"Ollama is not reachable at {self._host}") from exc

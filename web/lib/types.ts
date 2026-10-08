@@ -38,12 +38,22 @@ export interface StreamMeta {
   notice: string | null;
 }
 
+export interface MessageAttachment {
+  filename: string;
+  size: number;
+  mimeType: string;
+  /** Data URL used to render image thumbnails after the chat is reopened. */
+  previewUrl?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: Role;
   content: string;
   /** Base64-encoded image attachments sent with user messages. */
   images?: string[];
+  /** Display metadata only; extracted document text is never stored here. */
+  attachments?: MessageAttachment[];
   createdAt: number;
   meta?: StreamMeta;
   error?: string;

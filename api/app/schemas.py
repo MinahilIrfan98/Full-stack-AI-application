@@ -13,13 +13,29 @@ class ChatMessage(BaseModel):
     images: list[str] = Field(default_factory=list, description="List of base64 encoded images")
 
 
+class FileContext(BaseModel):
+    filename: str
+    text: str = ""
+    session_id: str | None = None
+    retrieval: bool = False
+
+
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
+    file_context: FileContext | None = Field(default=None)
     provider: str | None = Field(
         default=None, description="Provider id, e.g. 'ollama' or 'openai'. Omit for automatic."
     )
     model: str | None = Field(default=None, description="Model id within the provider.")
     temperature: float | None = Field(default=None, ge=0, le=2)
+
+
+class UploadResponse(BaseModel):
+    filename: str
+    text: str
+    truncated: bool
+    session_id: str | None = None
+    retrieval: bool = False
 
 
 class ModelInfo(BaseModel):

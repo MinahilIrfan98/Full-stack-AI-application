@@ -54,10 +54,7 @@ async function errorMessage(res: Response): Promise<string> {
   } catch {
     /* not JSON */
   }
-  if (res.status === 502 || res.status === 504 || res.status === 500) {
-    return "Can't reach the AI server. Make sure the API is running.";
-  }
-  return `Request failed (${res.status})`;
+  return `HTTP ${res.status}: Request failed with no detail message.`;
 }
 
 export async function fetchModels(refresh = false, signal?: AbortSignal): Promise<ModelsResponse> {
@@ -75,12 +72,52 @@ export async function fetchModels(refresh = false, signal?: AbortSignal): Promis
   return (await res.json()) as ModelsResponse;
 }
 
+export interface UploadResponse {
+  filename: string;
+  text: string;
+  truncated: boolean;
+  session_id?: string | null;
+  retrieval?: boolean;
+}
+
+/** POST /api/upload handles document text extraction. */
+export async function uploadFile(file: File): Promise<UploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/upload`, {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError("Network error: couldn't connect to the API server. Check that it is running and reachable.");
+  }
+
+  console.log("File upload response status:", res.status);
+  if (!res.ok) {
+    const detail = await errorMessage(res);
+    const reason = res.status === 413
+      ? detail
+      : res.status === 415
+        ? `Unsupported file type. ${detail}`
+        : detail.startsWith("HTTP ")
+          ? detail
+          : `HTTP ${res.status}: ${detail}`;
+    throw new ApiError(reason, res.status);
+  }
+  return (await res.json()) as UploadResponse;
+}
+
 export interface StreamChatOptions {
   messages: { role: Role; content: string; images?: string[] }[];
   selection: ModelSelection;
   signal: AbortSignal;
   onMeta: (meta: StreamMeta) => void;
   onDelta: (text: string) => void;
+  fileContext?: { filename: string; text: string; session_id?: string; retrieval?: boolean };
 }
 
 /** POST /api/chat and parse the server-sent event stream. */
@@ -90,6 +127,7 @@ export async function streamChat({
   signal,
   onMeta,
   onDelta,
+  fileContext,
 }: StreamChatOptions): Promise<void> {
   let res: Response;
   try {
@@ -100,6 +138,14 @@ export async function streamChat({
         messages,
         provider: selection?.provider ?? null,
         model: selection?.model ?? null,
+        file_context: fileContext
+          ? {
+              filename: fileContext.filename,
+              text: fileContext.text,
+              session_id: fileContext.session_id,
+              retrieval: fileContext.retrieval ?? false,
+            }
+          : null,
       }),
       signal,
     });

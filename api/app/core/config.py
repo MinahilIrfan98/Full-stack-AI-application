@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     # Behaviour
     allow_cloud_fallback: bool = True
     request_timeout_seconds: float = 120.0
+    ollama_timeout_seconds: float = 600.0
+    max_upload_mb: int = 4
     model_cache_ttl_seconds: float = 30.0
     max_messages: int = 100
     max_message_chars: int = 32_000

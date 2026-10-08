@@ -1,4 +1,5 @@
 from tests.conftest import FakeProvider, parse_sse
+from app.services.file_memory import FileMemory
 
 USER = {"messages": [{"role": "user", "content": "Hi"}]}
 
@@ -39,6 +40,59 @@ def test_system_prompt_is_prepended(make_client):
     _, messages = ollama.calls[0]
     assert messages[0].role == "system"
     assert messages[0].content == "Be helpful."
+
+
+def test_file_context_is_added_to_last_user_prompt(make_client):
+    ollama = FakeProvider("ollama", local=True, models=["gemma3:1b"])
+    client = make_client(ollama)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "Repeat the phrase."}],
+            "provider": "ollama",
+            "model": "gemma3:1b",
+            "file_context": {"filename": "test.txt", "text": "phrase: upload-chain-7f3a"},
+        },
+    )
+
+    assert response.status_code == 200
+    _, messages = ollama.calls[0]
+    assert messages[-1].content == (
+        "Context from test.txt:\n"
+        "phrase: upload-chain-7f3a\n\n"
+        "User Question: Repeat the phrase."
+    )
+
+
+async def test_large_file_context_retrieves_only_matching_chunks(make_client, monkeypatch):
+    ollama = FakeProvider("ollama", local=True, models=["gemma3:1b"])
+    memory = FileMemory("http://localhost:11434")
+
+    async def search(session_id, query, top_k=5):
+        assert session_id == "session-1"
+        assert query == "What was the key result?"
+        assert top_k == 5
+        return ["Key result: 42 participants improved."]
+
+    monkeypatch.setattr(memory, "search", search)
+    monkeypatch.setattr("app.services.chat.get_file_memory", lambda host: memory)
+    response = make_client(ollama).post(
+        "/api/chat",
+        json={
+            "messages": [{"role": "user", "content": "What was the key result?"}],
+            "file_context": {
+                "filename": "study.pdf",
+                "session_id": "session-1",
+                "retrieval": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    _, messages = ollama.calls[0]
+    assert "Key result: 42 participants improved." in messages[-1].content
+    assert "session-1" not in messages[-1].content
 
 
 def test_uses_explicitly_selected_model(make_client):

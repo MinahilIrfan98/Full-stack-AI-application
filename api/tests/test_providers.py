@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from ollama import ResponseError
 
 from app.core.config import Settings
 from app.providers.base import ProviderError
@@ -76,6 +77,32 @@ async def test_ollama_streams_deltas():
     provider._client.chat = fake_chat
     out = [t async for t in provider.stream_chat("m", [ChatMessage(role="user", content="hi")])]
     assert out == ["Hel", "lo"]
+
+
+async def test_ollama_retries_resource_allocation_at_smaller_context():
+    provider = OllamaProvider("http://localhost:11434")
+    calls = []
+
+    async def fake_chat(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise ResponseError("unable to allocate CPU buffer")
+
+        async def gen():
+            yield SimpleNamespace(message=SimpleNamespace(content="file answer"))
+
+        return gen()
+
+    provider._client.chat = fake_chat
+    out = [
+        t
+        async for t in provider.stream_chat(
+            "gemma3:1b", [ChatMessage(role="user", content="hi")]
+        )
+    ]
+
+    assert out == ["file answer"]
+    assert [call["options"]["num_ctx"] for call in calls] == [8192, 2048]
 
 
 async def test_unconfigured_cloud_provider_raises():

@@ -58,7 +58,9 @@ def build_providers(settings: Settings) -> list[Provider]:
     }
     ordered = [cloud[p] for p in settings.cloud_priority if p in cloud]
     ordered += [p for key, p in cloud.items() if key not in settings.cloud_priority]
-    local = OllamaProvider(settings.ollama_host, settings.ollama_enabled, t)
+    local = OllamaProvider(
+        settings.ollama_host, settings.ollama_enabled, settings.ollama_timeout_seconds
+    )
     return [local, *ordered]
 
 
