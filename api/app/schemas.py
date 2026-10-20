@@ -23,6 +23,7 @@ class FileContext(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     file_context: FileContext | None = Field(default=None)
+    file_ids: list[str] = Field(default_factory=list)
     provider: str | None = Field(
         default=None, description="Provider id, e.g. 'ollama' or 'openai'. Omit for automatic."
     )
@@ -31,9 +32,11 @@ class ChatRequest(BaseModel):
 
 
 class UploadResponse(BaseModel):
+    file_id: str
     filename: str
     text: str
     truncated: bool
+    # Legacy fields retained for clients predating stable file IDs.
     session_id: str | None = None
     retrieval: bool = False
 

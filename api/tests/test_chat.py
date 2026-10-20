@@ -1,5 +1,6 @@
+from app.core.config import Settings
+from app.services.file_memory import FileMemory, SearchResult
 from tests.conftest import FakeProvider, parse_sse
-from app.services.file_memory import FileMemory
 
 USER = {"messages": [{"role": "user", "content": "Hi"}]}
 
@@ -42,56 +43,38 @@ def test_system_prompt_is_prepended(make_client):
     assert messages[0].content == "Be helpful."
 
 
-def test_file_context_is_added_to_last_user_prompt(make_client):
+async def test_chat_injects_retrieved_context_and_sources(make_client, monkeypatch, tmp_path):
     ollama = FakeProvider("ollama", local=True, models=["gemma3:1b"])
-    client = make_client(ollama)
-
-    response = client.post(
-        "/api/chat",
-        json={
-            "messages": [{"role": "user", "content": "Repeat the phrase."}],
-            "provider": "ollama",
-            "model": "gemma3:1b",
-            "file_context": {"filename": "test.txt", "text": "phrase: upload-chain-7f3a"},
-        },
+    memory = FileMemory(
+        "http://localhost:11434", Settings(_env_file=None, rag_data_dir=str(tmp_path))
     )
 
-    assert response.status_code == 200
-    _, messages = ollama.calls[0]
-    assert messages[-1].content == (
-        "Context from test.txt:\n"
-        "phrase: upload-chain-7f3a\n\n"
-        "User Question: Repeat the phrase."
-    )
-
-
-async def test_large_file_context_retrieves_only_matching_chunks(make_client, monkeypatch):
-    ollama = FakeProvider("ollama", local=True, models=["gemma3:1b"])
-    memory = FileMemory("http://localhost:11434")
-
-    async def search(session_id, query, top_k=5):
-        assert session_id == "session-1"
+    async def search(file_ids, query, top_k=None):
+        assert file_ids == ["session-1"]
         assert query == "What was the key result?"
-        assert top_k == 5
-        return ["Key result: 42 participants improved."]
+        return [
+            SearchResult(
+                "session-1", "study.pdf", 3, "Key result: 42 participants improved.", 0.9
+            )
+        ]
 
     monkeypatch.setattr(memory, "search", search)
-    monkeypatch.setattr("app.services.chat.get_file_memory", lambda host: memory)
+    monkeypatch.setattr("app.services.chat.get_file_memory", lambda host, settings: memory)
     response = make_client(ollama).post(
         "/api/chat",
         json={
             "messages": [{"role": "user", "content": "What was the key result?"}],
-            "file_context": {
-                "filename": "study.pdf",
-                "session_id": "session-1",
-                "retrieval": True,
-            },
+            "file_ids": ["session-1"],
         },
     )
 
     assert response.status_code == 200
     _, messages = ollama.calls[0]
-    assert "Key result: 42 participants improved." in messages[-1].content
+    assert "Key result: 42 participants improved." in messages[0].content
+    assert "[1] (study.pdf)" in messages[0].content
+    events = parse_sse(response.text)
+    assert events[0][0] == "sources"
+    assert events[0][1]["sources"][0]["filename"] == "study.pdf"
     assert "session-1" not in messages[-1].content
 
 

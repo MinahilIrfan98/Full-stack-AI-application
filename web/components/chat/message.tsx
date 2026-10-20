@@ -184,14 +184,27 @@ export function Message({
           <Typing />
         ) : null}
 
-        {message.error && (
-          <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            <span className="flex-1">{message.error}</span>
-            <Button size="sm" variant="outline" onClick={() => onRegenerate(message.id)}>
-              <RefreshCwIcon />
-              Try again
-            </Button>
-          </div>
+        {!!message.sources?.length && (
+          <details className="mt-3 rounded-lg border bg-card px-3 py-2 text-sm">
+            <summary className="cursor-pointer font-medium text-muted-foreground">
+              Sources ({message.sources.length})
+            </summary>
+            <ol className="mt-2 space-y-2">
+              {message.sources.map((source, index) => (
+                <li
+                  key={`${source.filename}-${source.chunk_index}-${index}`}
+                  className="text-muted-foreground"
+                >
+                  <span className="font-medium text-foreground">[{index + 1}] {source.filename}</span>
+                  <p className="mt-0.5 text-xs">{source.snippet}</p>
+                </li>
+              ))}
+            </ol>
+          </details>
+        )}
+
+        {message.sourcesWarning && (
+          <p className="mt-2 text-xs text-muted-foreground">{message.sourcesWarning}</p>
         )}
 
         {!message.pending && !message.error && (
@@ -231,6 +244,16 @@ export function Message({
                 {meta.model}
               </span>
             )}
+          </div>
+        )}
+
+        {message.error && (
+          <div className="mt-2 flex flex-wrap items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            <span className="flex-1">{message.error}</span>
+            <Button size="sm" variant="outline" onClick={() => onRegenerate(message.id)}>
+              <RefreshCwIcon />
+              Try again
+            </Button>
           </div>
         )}
       </div>

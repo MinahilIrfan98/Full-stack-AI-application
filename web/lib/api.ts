@@ -1,4 +1,4 @@
-import type { ModelSelection, ModelsResponse, Role, StreamMeta } from "@/lib/types";
+import type { ModelSelection, ModelsResponse, Role, SourceCitation, StreamMeta } from "@/lib/types";
 
 /**
  * Requests go to `/api/*` on the same origin; `next.config.ts` rewrites them to
@@ -73,11 +73,20 @@ export async function fetchModels(refresh = false, signal?: AbortSignal): Promis
 }
 
 export interface UploadResponse {
+  file_id: string;
   filename: string;
+  /** Retained for compatibility with older API clients. */
   text: string;
   truncated: boolean;
   session_id?: string | null;
   retrieval?: boolean;
+}
+
+export async function deleteUploadedFile(fileId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/upload/${encodeURIComponent(fileId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
 }
 
 /** POST /api/upload handles document text extraction. */
@@ -93,19 +102,22 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
       cache: "no-store",
     });
   } catch {
-    throw new ApiError("Network error: couldn't connect to the API server. Check that it is running and reachable.");
+    throw new ApiError(
+      "Network error: couldn't connect to the API server. Check that it is running and reachable.",
+    );
   }
 
   console.log("File upload response status:", res.status);
   if (!res.ok) {
     const detail = await errorMessage(res);
-    const reason = res.status === 413
-      ? detail
-      : res.status === 415
-        ? `Unsupported file type. ${detail}`
-        : detail.startsWith("HTTP ")
-          ? detail
-          : `HTTP ${res.status}: ${detail}`;
+    const reason =
+      res.status === 413
+        ? detail
+        : res.status === 415
+          ? `Unsupported file type. ${detail}`
+          : detail.startsWith("HTTP ")
+            ? detail
+            : `HTTP ${res.status}: ${detail}`;
     throw new ApiError(reason, res.status);
   }
   return (await res.json()) as UploadResponse;
@@ -117,7 +129,8 @@ export interface StreamChatOptions {
   signal: AbortSignal;
   onMeta: (meta: StreamMeta) => void;
   onDelta: (text: string) => void;
-  fileContext?: { filename: string; text: string; session_id?: string; retrieval?: boolean };
+  fileIds?: string[];
+  onSources: (sources: SourceCitation[], warning?: string) => void;
 }
 
 /** POST /api/chat and parse the server-sent event stream. */
@@ -127,7 +140,8 @@ export async function streamChat({
   signal,
   onMeta,
   onDelta,
-  fileContext,
+  fileIds = [],
+  onSources,
 }: StreamChatOptions): Promise<void> {
   let res: Response;
   try {
@@ -138,14 +152,7 @@ export async function streamChat({
         messages,
         provider: selection?.provider ?? null,
         model: selection?.model ?? null,
-        file_context: fileContext
-          ? {
-              filename: fileContext.filename,
-              text: fileContext.text,
-              session_id: fileContext.session_id,
-              retrieval: fileContext.retrieval ?? false,
-            }
-          : null,
+        file_ids: fileIds,
       }),
       signal,
     });
@@ -172,6 +179,12 @@ export async function streamChat({
     switch (event) {
       case "meta":
         onMeta(payload as unknown as StreamMeta);
+        break;
+      case "sources":
+        onSources(
+          Array.isArray(payload.sources) ? (payload.sources as SourceCitation[]) : [],
+          typeof payload.warning === "string" ? payload.warning : undefined,
+        );
         break;
       case "error":
         throw new ApiError(String(payload.message ?? "Something went wrong."));

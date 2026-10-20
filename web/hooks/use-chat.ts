@@ -18,6 +18,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
   const [hydrated, setHydrated] = useState(false);
 
   const controller = useRef<AbortController | null>(null);
+  const conversationsRef = useRef<Conversation[]>([]);
   const selectionRef = useRef(selection);
   const onFinishRef = useRef(onFinish);
   const activeIdRef = useRef<string | null>(null);
@@ -29,9 +30,15 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
 
   // Load once on the client (localStorage is not available during SSR).
   useEffect(() => {
-    setConversations(readStorage<Conversation[]>(KEY, []));
+    const saved = readStorage<Conversation[]>(KEY, []);
+    conversationsRef.current = saved;
+    setConversations(saved);
     setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
 
   // Persist whenever we're not mid-stream (avoids writing on every token).
   useEffect(() => {
@@ -68,12 +75,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
     async (
       convId: string,
       history: ChatMessage[],
-      fileContext?: {
-        filename: string;
-        text: string;
-        session_id?: string;
-        retrieval?: boolean;
-      },
+      fileId?: string,
     ) => {
       const reply: ChatMessage = {
         id: uid(),
@@ -105,11 +107,23 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
           selection: selectionRef.current,
           signal: ctrl.signal,
           onMeta: (meta) => patchMessage(convId, reply.id, { meta }),
+          onSources: (sources, warning) =>
+            patchMessage(convId, reply.id, { sources, sourcesWarning: warning }),
           onDelta: (text) => {
             buffer += text;
             if (!frame) frame = requestAnimationFrame(flush);
           },
-          fileContext,
+          fileIds: [
+            ...new Set([
+              ...history.flatMap(
+                (message) =>
+                  message.attachments?.flatMap((attachment) =>
+                    attachment.file_id ? [attachment.file_id] : [],
+                  ) ?? [],
+              ),
+              ...(fileId ? [fileId] : []),
+            ]),
+          ],
         });
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
@@ -138,12 +152,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
     (
       text: string,
       images?: string[],
-      fileContext?: {
-        filename: string;
-        text: string;
-        session_id?: string;
-        retrieval?: boolean;
-      },
+      fileContext?: { filename: string; file_id: string },
       attachments?: MessageAttachment[],
     ) => {
       const content = text.trim();
@@ -159,7 +168,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       };
       const existing = conversations.find((c) => c.id === activeId);
       if (existing) {
-        void generate(existing.id, [...existing.messages.filter((m) => !m.error), userMsg], fileContext);
+        void generate(existing.id, [...existing.messages.filter((m) => !m.error), userMsg], fileContext?.file_id);
         return;
       }
       const conv: Conversation = {
@@ -171,7 +180,7 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       };
       setConversations((list) => [conv, ...list]);
       setActiveId(conv.id);
-      void generate(conv.id, [userMsg], fileContext);
+      void generate(conv.id, [userMsg], fileContext?.file_id);
     },
     [activeId, conversations, generate],
   );
@@ -185,13 +194,16 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
       // Use the ref for synchronous check of the active conversation
       const currentId = activeIdRef.current;
 
+      let next: Conversation[];
       if (currentId) {
-        setConversations((list) =>
-          list.map((c) =>
-            c.id === currentId
-              ? { ...c, messages: [...c.messages, message], updatedAt: Date.now() }
-              : c,
-          ),
+        next = conversationsRef.current.map((conversation) =>
+          conversation.id === currentId
+            ? {
+                ...conversation,
+                messages: [...conversation.messages, message],
+                updatedAt: Date.now(),
+              }
+            : conversation,
         );
       } else {
         const conversation: Conversation = {
@@ -201,9 +213,21 @@ export function useChat(selection: ModelSelection, onFinish?: () => void) {
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
-        setConversations((list) => [conversation, ...list]);
+        next = [conversation, ...conversationsRef.current];
         updateActiveId(conversation.id);
       }
+
+      conversationsRef.current = next;
+      setConversations(next);
+      writeStorage(
+        KEY,
+        next
+          .slice(0, MAX_SAVED)
+          .map((conversation) => ({
+            ...conversation,
+            messages: conversation.messages.filter((item) => !item.pending),
+          })),
+      );
     },
     [updateActiveId],
   );

@@ -1,13 +1,18 @@
 """Application settings, loaded from environment variables and `.env`."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[2] / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # App
     app_name: str = "AI Assistant API"
@@ -27,6 +32,11 @@ class Settings(BaseSettings):
     model_cache_ttl_seconds: float = 30.0
     max_messages: int = 100
     max_message_chars: int = 32_000
+    rag_top_k: int = 4
+    rag_min_score: float = 0.3
+    rag_chunk_size: int = 800
+    rag_chunk_overlap: int = 150
+    rag_data_dir: str = "data"
 
     # Local: Ollama (always tried first)
     ollama_host: str = "http://localhost:11434"

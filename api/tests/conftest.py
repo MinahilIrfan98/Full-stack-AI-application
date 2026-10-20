@@ -76,8 +76,13 @@ def parse_sse(text: str) -> list[tuple[str, dict]]:
 
 
 @pytest.fixture
-def settings() -> Settings:
-    return Settings(_env_file=None, system_prompt="Be helpful.", cors_origins=["*"])
+def settings(tmp_path) -> Settings:
+    return Settings(
+        _env_file=None,
+        system_prompt="Be helpful.",
+        cors_origins=["*"],
+        rag_data_dir=str(tmp_path / "rag-data"),
+    )
 
 
 @pytest.fixture

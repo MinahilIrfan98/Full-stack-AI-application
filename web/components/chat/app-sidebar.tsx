@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   CheckIcon,
   EllipsisIcon,
@@ -25,8 +25,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { APP_CONFIG, initialsOf } from "@/lib/config";
+import { APP_CONFIG } from "@/lib/config";
 import { cn } from "@/lib/utils";
+import { useProfile } from "@/hooks/use-profile";
 import type { Conversation } from "@/lib/types";
 
 const DAY = 86_400_000;
@@ -68,7 +69,32 @@ export function AppSidebar({
   apiOnline: boolean;
 }) {
   const [query, setQuery] = useState("");
+  const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+  const [profileDraft, setProfileDraft] = useState("");
+  const profileInput = useRef<HTMLInputElement>(null);
+  const { name, ready, saveName } = useProfile();
   const { theme, setTheme } = useTheme();
+
+  useEffect(() => {
+    if (ready && !name) {
+      setProfileDraft("");
+      setProfileDialogOpen(true);
+    }
+  }, [name, ready]);
+
+  useEffect(() => {
+    if (profileDialogOpen) profileInput.current?.focus();
+  }, [profileDialogOpen]);
+
+  const openProfileDialog = () => {
+    setProfileDraft(name);
+    setProfileDialogOpen(true);
+  };
+
+  const saveProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (saveName(profileDraft)) setProfileDialogOpen(false);
+  };
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -181,17 +207,18 @@ export function AppSidebar({
       </nav>
 
       <div className="border-t p-2">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 rounded-md p-2 text-left text-sm hover:bg-sidebar-accent"
-            >
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={openProfileDialog}
+            aria-label={name ? `Change display name, ${name}` : "Set display name"}
+            className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md p-2 text-left text-sm hover:bg-sidebar-accent"
+          >
               <span className="grid size-8 place-items-center rounded-full bg-foreground text-xs font-semibold text-background">
-                {initialsOf(APP_CONFIG.user.name)}
+                {name ? name[0].toUpperCase() : "?"}
               </span>
               <span className="flex min-w-0 flex-col leading-tight">
-                <span className="truncate font-medium">{APP_CONFIG.user.name}</span>
+                <span className="truncate font-medium">{name || "Set your name"}</span>
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <span
                     className={cn(
@@ -202,7 +229,12 @@ export function AppSidebar({
                   {apiOnline ? "Connected" : "API offline"}
                 </span>
               </span>
-            </button>
+          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Appearance and chat settings">
+                <EllipsisIcon />
+              </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent side="top" align="start" className="w-(--radix-dropdown-menu-trigger-width)">
             <DropdownMenuLabel>Appearance</DropdownMenuLabel>
@@ -230,7 +262,46 @@ export function AppSidebar({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </div>
       </div>
+
+      {profileDialogOpen && (
+        <div
+          className="fixed inset-0 z-[60] grid place-items-center bg-black/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && name) setProfileDialogOpen(false);
+          }}
+        >
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="profile-dialog-title"
+            onSubmit={saveProfile}
+            className="w-full max-w-sm rounded-xl border bg-background p-6 text-foreground shadow-lg"
+          >
+            <h2 id="profile-dialog-title" className="text-lg font-semibold">
+              What should I call you?
+            </h2>
+            <label htmlFor="profile-name" className="sr-only">
+              Display name
+            </label>
+            <Input
+              id="profile-name"
+              ref={profileInput}
+              value={profileDraft}
+              onChange={(event) => setProfileDraft(event.target.value.slice(0, 40))}
+              maxLength={40}
+              autoComplete="given-name"
+              className="mt-4"
+              required
+            />
+            <Button type="submit" className="mt-4 w-full" disabled={!profileDraft.trim()}>
+              Save
+            </Button>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

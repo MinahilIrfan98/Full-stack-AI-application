@@ -12,12 +12,31 @@ from app.services.file_memory import get_file_memory
 router = APIRouter(prefix="/upload", tags=["upload"])
 logger = logging.getLogger(__name__)
 
-MAX_TEXT_LENGTH = 8000
-SMALL_FILE_THRESHOLD = 4 * 1024 * 1024
 SUPPORTED_TEXT_EXTENSIONS = {
-    "txt", "md", "csv", "json", "py", "js", "jsx", "ts", "tsx", "html", "css",
-    "sql", "sh", "yaml", "yml", "toml", "xml", "java", "c", "h", "cpp", "go",
-    "rs", "ipynb",
+    "txt",
+    "md",
+    "csv",
+    "json",
+    "py",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "html",
+    "css",
+    "sql",
+    "sh",
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "java",
+    "c",
+    "h",
+    "cpp",
+    "go",
+    "rs",
+    "ipynb",
 }
 SUPPORTED_EXTENSIONS = SUPPORTED_TEXT_EXTENSIONS | {"pdf", "docx"}
 
@@ -38,9 +57,7 @@ def extract_text_from_file(file_obj, filename: str) -> str:
 
 
 @router.post("", response_model=UploadResponse)
-async def upload_file(
-    request: Request, file: UploadFile = File(...)
-) -> UploadResponse:
+async def upload_file(request: Request, file: UploadFile = File(...)) -> UploadResponse:
     filename = file.filename or ""
     extension = PurePath(filename).suffix.lower().lstrip(".")
     if extension not in SUPPORTED_EXTENSIONS:
@@ -50,7 +67,8 @@ async def upload_file(
             f"Unsupported file type. Supported extensions: {supported}.",
         )
 
-    max_upload_mb = request.app.state.settings.max_upload_mb
+    settings = request.app.state.settings
+    max_upload_mb = settings.max_upload_mb
     max_file_size = max_upload_mb * 1024 * 1024
     size = 0
     try:
@@ -73,28 +91,28 @@ async def upload_file(
             f"Could not extract text from this {extension.upper()} file. Verify that it is valid and not corrupted.",
         ) from exc
 
-    if size <= SMALL_FILE_THRESHOLD:
-        truncated = len(text) > MAX_TEXT_LENGTH
-        return UploadResponse(
-            filename=filename,
-            text=text[:MAX_TEXT_LENGTH],
-            truncated=truncated,
-        )
-
     try:
-        ollama_host = request.app.state.settings.ollama_host
-        session_id = await get_file_memory(ollama_host).index(filename, text)
+        file_id = await get_file_memory(settings.ollama_host, settings).index(filename, text)
     except Exception as exc:
         logger.warning("Could not index uploaded file %s: %s", filename, exc, exc_info=True)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            f"Could not prepare this large file for search: {exc}",
+            f"Could not prepare this file for search: {exc}",
         ) from exc
 
     return UploadResponse(
+        file_id=file_id,
         filename=filename,
         text="",
         truncated=False,
-        session_id=session_id,
+        session_id=file_id,
         retrieval=True,
     )
+
+
+@router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_file(file_id: str, request: Request) -> None:
+    settings = request.app.state.settings
+    deleted = await get_file_memory(settings.ollama_host, settings).delete(file_id)
+    if not deleted:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Uploaded file was not found.")

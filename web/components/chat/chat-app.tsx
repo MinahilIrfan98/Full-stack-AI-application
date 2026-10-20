@@ -72,7 +72,7 @@ export function ChatApp() {
     onOpen: openChat,
     onDelete: deleteChat,
     onClearAll: clearAll,
-    apiOnline: !models.error,
+    apiOnline: models.data !== null && !models.error,
   };
 
   const composer = (

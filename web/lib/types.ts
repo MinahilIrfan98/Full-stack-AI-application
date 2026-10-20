@@ -38,12 +38,19 @@ export interface StreamMeta {
   notice: string | null;
 }
 
+export interface SourceCitation {
+  filename: string;
+  chunk_index: number;
+  snippet: string;
+}
+
 export interface MessageAttachment {
   filename: string;
   size: number;
   mimeType: string;
   /** Data URL used to render image thumbnails after the chat is reopened. */
   previewUrl?: string;
+  file_id?: string;
 }
 
 export interface ChatMessage {
@@ -56,6 +63,8 @@ export interface ChatMessage {
   attachments?: MessageAttachment[];
   createdAt: number;
   meta?: StreamMeta;
+  sources?: SourceCitation[];
+  sourcesWarning?: string;
   error?: string;
   pending?: boolean;
   feedback?: "up" | "down" | null;

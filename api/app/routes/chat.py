@@ -25,7 +25,7 @@ async def chat(
 ) -> StreamingResponse:
     """Stream a reply as server-sent events.
 
-    Events: `meta` (which provider/model answered), unnamed `data: {"delta": ...}`
+    Events: `sources`, `meta` (which provider/model answered), unnamed `data: {"delta": ...}`
     chunks, then `done` or `error`.
     """
     if len(body.messages) > settings.max_messages:

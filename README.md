@@ -8,8 +8,8 @@ OpenChat is a self-hosted AI chat application with a Next.js web client, a FastA
 - Ollama models and optional Anthropic, OpenAI-compatible, Gemini, Grok, and Meta providers.
 - Image attachments for vision-capable models.
 - Text, Markdown, CSV, JSON, source code, PDF, and DOCX file attachments.
-- Large document retrieval using Ollama embeddings and an in-memory per-upload index.
-- Browser-local conversation history, dark mode, and light mode.
+- RAG file search with cited sources and a persistent SQLite index.
+- Browser-local conversation history, including voice call transcripts, plus dark mode and light mode.
 - Optional Gemini realtime voice sessions through LiveKit.
 
 ## Repository layout
@@ -64,7 +64,7 @@ For local chat, run Ollama and pull a model:
 ollama pull gemma3:1b
 ```
 
-For image questions, install a vision model supported by Ollama (for example, `llava`) and select it in the app. Large document retrieval uses `nomic-embed-text`; the API attempts to pull it when needed.
+For image questions, install a vision model supported by Ollama (for example, `llava`) and select it in the app. File indexing requires `nomic-embed-text` (`ollama pull nomic-embed-text`).
 
 ### 2. Start the API
 
@@ -92,7 +92,7 @@ Open <http://localhost:3000>. The Next.js server forwards `/api/*` requests to t
 
 ## Voice agent (optional)
 
-The browser requests a room token from FastAPI; the API dispatches the configured worker to LiveKit. The worker reads `GOOGLE_API_KEY` and `LIVEKIT_AGENT_NAME` from `api/.env` and uses Gemini Live (`gemini-3.1-flash-live-preview`) for speech-to-speech. No Deepgram or local Ollama service is used by the voice agent.
+The browser requests a room token from FastAPI; the API dispatches the configured worker to LiveKit. The worker reads `GOOGLE_API_KEY` and `LIVEKIT_AGENT_NAME` from `api/.env` and uses Gemini Live (`gemini-3.1-flash-live-preview`) for speech-to-speech. Final voice transcripts are saved with the conversation in the browser's local history; audio recordings are not stored. No Deepgram or local Ollama service is used by the voice agent.
 
 Add these values to `api/.env`:
 
@@ -137,6 +137,11 @@ The API reads settings from environment variables and `api/.env`. Common setting
 | `OLLAMA_ENABLED` | `true` | Enable the local Ollama provider. |
 | `ALLOW_CLOUD_FALLBACK` | `true` | Allow configured cloud providers if a model fails before streaming begins. |
 | `MAX_UPLOAD_MB` | `4` | Maximum upload size in megabytes. |
+| `RAG_TOP_K` | `4` | Maximum relevant chunks retrieved for each question. |
+| `RAG_MIN_SCORE` | `0.3` | Minimum cosine similarity for a retrieved chunk. |
+| `RAG_CHUNK_SIZE` | `800` | Characters per indexed chunk. |
+| `RAG_CHUNK_OVERLAP` | `150` | Overlapping characters between chunks. |
+| `RAG_DATA_DIR` | `data` | Index directory relative to `api/`; contents are ignored by Git. |
 | `REQUEST_TIMEOUT_SECONDS` | `120` | Cloud provider request timeout. |
 | `OLLAMA_TIMEOUT_SECONDS` | `600` | Ollama request timeout. |
 | `CORS_ORIGINS` | `http://localhost:3000` | Allowed origins for direct browser-to-API requests. |
@@ -150,7 +155,11 @@ Cloud chat providers use their respective API key settings in `api/.env`. The AP
 
 ## File uploads and retrieval
 
-Uploads up to 4 MB use extracted text as direct context, capped at 8,000 characters. Larger files are chunked, embedded with Ollama's `nomic-embed-text`, and kept in an in-memory index for the running API process. If the API restarts, attach the large file again. Increase `MAX_UPLOAD_MB` for local use if needed, then restart the API.
+Every supported upload is extracted, split into overlapping chunks, and embedded with Ollama's `nomic-embed-text`. For each question, OpenChat searches the active conversation's uploaded files, selects up to `RAG_TOP_K` chunks above `RAG_MIN_SCORE`, and passes those chunks to the model as numbered context blocks. The response can cite those blocks as `[1]`, `[2]`; the assistant message shows a collapsible Sources list with filenames and snippets. Chunk text and vectors are stored in SQLite under `api/data/` by default, so the index survives API restarts. Removing an attached file deletes its index. Removing `api/data/` erases all indexed files.
+
+### How RAG works
+
+`upload → extract text → chunk and embed → persist → retrieve relevant chunks per question → answer with source citations`
 
 ## Docker Compose
 
@@ -193,14 +202,17 @@ npm run build
 |---|---|---|
 | `GET` | `/api/health` | Health check. |
 | `GET` | `/api/models` | Lists available local and configured cloud models. Add `?refresh=true` to bypass the short cache. |
-| `POST` | `/api/upload` | Extracts supported document text or indexes a large document. Multipart field: `file`. |
-| `POST` | `/api/chat` | Streams a response as SSE. |
+| `POST` | `/api/upload` | Extracts and indexes a supported document; returns a stable `file_id` and filename metadata. Multipart field: `file`. |
+| `DELETE` | `/api/upload/{file_id}` | Deletes a file and its indexed chunks. |
+| `POST` | `/api/chat` | Streams a response as SSE; accepts optional `file_ids` and emits a `sources` event before response tokens. |
 | `POST` | `/api/voice/token` | Issues a short-lived LiveKit participant token and dispatches the configured voice worker. |
 
 ## Troubleshooting
 
 - **No model appears:** Check that Ollama is running and a chat model is installed (`ollama list`), or configure a cloud provider key.
 - **Image questions fail:** Select a vision-capable model.
-- **Large-file indexing fails:** Confirm Ollama is reachable and `nomic-embed-text` can be pulled and run.
+- **Embedding model is missing:** Start Ollama and run `ollama pull nomic-embed-text`, then retry the upload.
+- **A file is missing after deleting `api/data/`:** The index was erased; upload the file again.
+- **No relevant results appear:** Check that the intended file is attached, the question matches its content, and adjust `RAG_MIN_SCORE` if appropriate. A higher `RAG_MIN_SCORE` filters more chunks.
 - **Voice is unavailable:** Check the LiveKit settings in `api/.env`, confirm the worker is running, and verify `GOOGLE_API_KEY` is set.
 - **The web app cannot reach the API:** Confirm the backend is running on port 8000. If it uses a different URL, set `API_URL` for the Next.js server and restart it.

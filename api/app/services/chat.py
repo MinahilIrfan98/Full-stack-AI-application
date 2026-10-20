@@ -11,17 +11,18 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.core.config import Settings
 from app.providers.base import ProviderError
 from app.providers.registry import ProviderRegistry
 from app.schemas import ChatMessage, ChatRequest
-from app.services.file_memory import get_file_memory
+from app.services.file_memory import SearchResult, get_file_memory
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ChatEvent:
-    type: str  # "meta" | "delta" | "error" | "done"
+    type: str  # "sources" | "meta" | "delta" | "error" | "done"
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_sse(self) -> str:
@@ -38,17 +39,20 @@ NO_MODELS_MESSAGE = (
 
 
 class ChatService:
-    def __init__(self, registry: ProviderRegistry, system_prompt: str, allow_fallback: bool):
+    def __init__(self, registry: ProviderRegistry, settings: Settings):
         self._registry = registry
-        self._system_prompt = system_prompt
-        self._allow_fallback = allow_fallback
+        self._settings = settings
+        self._system_prompt = settings.system_prompt
+        self._allow_fallback = settings.allow_cloud_fallback
         ollama = registry.get("ollama")
         self._ollama_host = getattr(
             ollama, "_host", getattr(ollama, "host", "http://localhost:11434")
         )
 
     def _with_system(self, messages: list[ChatMessage]) -> list[ChatMessage]:
-        if not self._system_prompt or any(m.role == "system" for m in messages):
+        if any(m.role == "system" for m in messages):
+            return messages
+        if not self._system_prompt:
             return messages
         return [ChatMessage(role="system", content=self._system_prompt), *messages]
 
@@ -66,26 +70,52 @@ class ChatService:
             return
 
         messages = self._with_system(request.messages)
-
-        # Inject file context into the last user message
-        if request.file_context and messages and messages[-1].role == "user":
-            original_content = messages[-1].content
-            file_text = request.file_context.text
-            if request.file_context.retrieval and request.file_context.session_id:
-                try:
-                    chunks = await get_file_memory(self._ollama_host).search(
-                        request.file_context.session_id, original_content
-                    )
-                    file_text = "\n\n---\n\n".join(chunks)
-                except Exception as exc:
-                    yield ChatEvent("error", {"message": f"Could not search uploaded file: {exc}"})
-                    return
-            context_text = (
-                f"Context from {request.file_context.filename}:\n"
-                f"{file_text}\n\n"
-                f"User Question: {original_content}"
+        sources: list[SearchResult] = []
+        file_ids = list(request.file_ids)
+        if request.file_context and request.file_context.session_id:
+            file_ids.append(request.file_context.session_id)
+        if file_ids:
+            try:
+                sources = await get_file_memory(self._ollama_host, self._settings).search(
+                    list(dict.fromkeys(file_ids)), request.messages[-1].content
+                )
+            except Exception as exc:
+                logger.warning("RAG retrieval failed; continuing without file context: %s", exc)
+                yield ChatEvent(
+                    "sources",
+                    {
+                        "sources": [],
+                        "warning": "File search is unavailable right now. Continuing without file context.",
+                    },
+                )
+            else:
+                yield ChatEvent(
+                    "sources",
+                    {
+                        "sources": [
+                            {
+                                "filename": source.filename,
+                                "chunk_index": source.chunk_index,
+                                "snippet": source.text[:240],
+                            }
+                            for source in sources
+                        ]
+                    },
+                )
+        if sources:
+            context = "\n\n".join(
+                f"[{index}] ({source.filename}) {source.text}"
+                for index, source in enumerate(sources, start=1)
             )
-            messages[-1].content = context_text
+            rag_instructions = (
+                "Answer file questions using the supplied context. Cite supporting blocks as "
+                "[1], [2], etc. If the answer is not present in the context, say so clearly. "
+                "Do not invent file content.\n\nRetrieved context:\n" + context
+            )
+            if messages and messages[0].role == "system":
+                messages[0].content = f"{messages[0].content}\n\n{rag_instructions}"
+            else:
+                messages.insert(0, ChatMessage(role="system", content=rag_instructions))
 
         failures: list[str] = []
 

@@ -8,7 +8,7 @@ import { VoiceCall } from "@/components/chat/voice-call";
 import { APP_CONFIG } from "@/lib/config";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { uploadFile, type UploadResponse } from "@/lib/api";
+import { deleteUploadedFile, uploadFile } from "@/lib/api";
 import type { MessageAttachment } from "@/lib/types";
 
 export function Composer({
@@ -23,7 +23,7 @@ export function Composer({
   onSend: (
     text: string,
     images?: string[],
-    fileContext?: { filename: string; text: string; session_id?: string; retrieval?: boolean },
+    fileContext?: { filename: string; file_id: string },
     attachments?: MessageAttachment[],
   ) => void;
   onStop: () => void;
@@ -37,7 +37,7 @@ export function Composer({
   const [preview, setPreview] = useState<string | null>(null);
   const [imageAttachment, setImageAttachment] = useState<MessageAttachment | null>(null);
   const [attachedFile, setAttachedFile] = useState<
-    ({ filename: string; text: string; session_id?: string; retrieval?: boolean } & MessageAttachment) | null
+    ({ filename: string; file_id: string } & MessageAttachment) | null
   >(null);
   const [uploading, setUploading] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -75,15 +75,10 @@ export function Composer({
       const res = await uploadFile(file);
       setAttachedFile({
         filename: res.filename,
-        text: res.text,
-        session_id: res.session_id ?? undefined,
-        retrieval: res.retrieval ?? false,
+        file_id: res.file_id,
         size: file.size,
         mimeType: file.type,
       });
-      if (res.truncated) {
-        toast.info(`File truncated to 8000 characters.`);
-      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to upload file";
       toast.error(msg);
@@ -98,23 +93,16 @@ export function Composer({
     if (streaming) return onStop();
     if (!value.trim() && !preview && !attachedFile) return;
     if (disabled || uploading) return;
-    const attachments = [imageAttachment, attachedFile]
-      .filter((attachment): attachment is MessageAttachment => attachment !== null)
-      .map(({ filename, size, mimeType, previewUrl }) => ({
-        filename,
-        size,
-        mimeType,
-        previewUrl,
-      }));
+    const attachments: MessageAttachment[] = [];
+    if (imageAttachment) attachments.push(imageAttachment);
+    if (attachedFile) attachments.push(attachedFile);
     onSend(
       value,
       preview ? [preview.split(",")[1]] : undefined,
       attachedFile
         ? {
             filename: attachedFile.filename,
-            text: attachedFile.text,
-            session_id: attachedFile.session_id,
-            retrieval: attachedFile.retrieval,
+            file_id: attachedFile.file_id,
           }
         : undefined,
       attachments.length ? attachments : undefined,
@@ -165,7 +153,15 @@ export function Composer({
               <span className="max-w-[150px] truncate">{attachedFile.filename}</span>
               <button
                 type="button"
-                onClick={() => setAttachedFile(null)}
+                onClick={async () => {
+                  try {
+                    await deleteUploadedFile(attachedFile.file_id);
+                    setAttachedFile(null);
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Could not remove file");
+                  }
+                }}
+                aria-label={`Remove ${attachedFile.filename}`}
                 className="ml-1 flex size-3 items-center justify-center rounded-full hover:bg-muted-foreground/20"
               >
                 <X className="size-3" />
